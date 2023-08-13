@@ -7,7 +7,58 @@ from sklearn.model_selection import cross_val_score
 from tensorflow import keras
 from scikeras.wrappers import KerasClassifier ##from tensorflow.keras.wrappers.scikit_learn import KerasClassifier, KerasRegressor已被移除 用scikeras
 import pickle
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
 
+
+def Draw_ROC(fpr, tpr, roc_auc):
+    plt.figure()
+    lw = 2
+    plt.plot(fpr, tpr, color='darkorange',
+             lw=lw, label='ROC curve (area = %0.4f)' % roc_auc)
+    plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.legend(loc="lower right")
+    plt.show()
+
+def Draw_Loss(train_loss, valid_loss, epochs, seq_len):
+    plt.figure(figsize=(10, 5))
+    plt.plot(epochs, train_loss, label='Training Loss', color='blue')
+    plt.plot(epochs, valid_loss, label='Validation Loss', color='red')
+    plt.title('Training and Validation Loss (Length ' + str(seq_len) + ')')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss Value')
+    plt.legend()
+    plt.show()
+
+def compute_fpr_tpr_at_thresholds(y_true, y_scores, thresholds):
+    fprs = []
+    tprs = []
+
+    for thresh in thresholds:
+        # 为当前阈值进行分类
+        y_pred = (y_scores > thresh).astype(int)
+
+        # 计算TP, FP, TN, FN
+        TP = np.sum((y_pred == 1) & (y_true == 1))
+        FP = np.sum((y_pred == 1) & (y_true == 0))
+        TN = np.sum((y_pred == 0) & (y_true == 0))
+        FN = np.sum((y_pred == 0) & (y_true == 1))
+
+        # 计算FPR和TPR
+        FPR = FP / (FP + TN)
+        TPR = TP / (TP + FN)
+
+        fprs.append(FPR)
+        tprs.append(TPR)
+
+    fprs = np.array(fprs)
+    tprs = np.array(tprs)
+    return fprs, tprs
 
 class OutputType:
     
@@ -51,27 +102,32 @@ def finetune(model_generator, input_encoder, output_spec, train_seqs, train_raw_
         final_seq_len = 1024, final_lr = None, callbacks = []):
 
         ###先训练最后一层 可能训练40也可能更少  训练完最后一层后再训练整个网络
+    # 训练集 验证集编码
     encoded_train_set, encoded_valid_set = encode_train_and_valid_sets(train_seqs, train_raw_Y, valid_seqs, valid_raw_Y, input_encoder, output_spec, seq_len)
         
-    if begin_with_frozen_pretrained_layers:
+    if begin_with_frozen_pretrained_layers: #先训练最后一层
         log('Training with frozen pretrained layers...')
-        model_generator.train(encoded_train_set, encoded_valid_set, seq_len, batch_size, max_epochs_per_stage, lr = lr_with_frozen_pretrained_layers, \
+        _ = model_generator.train(encoded_train_set, encoded_valid_set, seq_len, batch_size, max_epochs_per_stage, lr = lr_with_frozen_pretrained_layers, \
                 callbacks = callbacks, freeze_pretrained_layers = True)
-     
+
+    # 训练整个网络
     log('Training the entire fine-tuned model...')
-    model_generator.train(encoded_train_set, encoded_valid_set, seq_len, batch_size, max_epochs_per_stage, lr = lr, callbacks = callbacks, \
+    train_loss, valid_loss = model_generator.train(encoded_train_set, encoded_valid_set, seq_len, batch_size, max_epochs_per_stage, lr = lr, callbacks = callbacks, \
             freeze_pretrained_layers = False)
+    epochs = range(1, len(train_loss) + 1)
+    Draw_Loss(train_loss, valid_loss, epochs, seq_len)
                 
-    if n_final_epochs > 0:
+    if n_final_epochs > 0: #按照特定seq长度训练整个网络
         log('Training on final epochs of sequence length %d...' % final_seq_len)
         final_batch_size = max(int(batch_size / (final_seq_len / seq_len)), 1)
         encoded_train_set, encoded_valid_set = encode_train_and_valid_sets(train_seqs, train_raw_Y, valid_seqs, valid_raw_Y, input_encoder, output_spec, final_seq_len)
-        model_generator.train(encoded_train_set, encoded_valid_set, final_seq_len, final_batch_size, n_final_epochs, lr = final_lr, callbacks = callbacks, \
+        _ = model_generator.train(encoded_train_set, encoded_valid_set, final_seq_len, final_batch_size, n_final_epochs, lr = final_lr, callbacks = callbacks, \
                 freeze_pretrained_layers = False)
                 
     model_generator.optimizer_weights = None
 
-    with open("proteinbert_models/model_afp11.pkl", "wb") as f:
+    # 保存训练好的afp1_5或afp11模型，需要手动改
+    with open("proteinbert_models/model_afp1_5_no_weights.pkl", "wb") as f:
         pickle.dump(model_generator, f)
 
 def evaluate_by_len(model_generator, input_encoder, output_spec, seqs, raw_Y, start_seq_len = 512, start_batch_size = 32, increase_factor = 2):
@@ -95,7 +151,7 @@ def evaluate_by_len(model_generator, input_encoder, output_spec, seqs, raw_Y, st
         y_mask = (sample_weights == 1)
         
         model = model_generator.create_model(seq_len) #根据蛋白质长度来构建模型 512 1024 2048
-        y_pred = model.predict(X, batch_size = batch_size) #这里出来的也不是标签吗
+        y_pred = model.predict(X, batch_size = batch_size)
 
         # model_our = KerasClassifier(build_fn=model, epochs=10, batch_size=32)
         # #X.shape??? y_true.shape???? X有两个 用哪个？
@@ -104,6 +160,8 @@ def evaluate_by_len(model_generator, input_encoder, output_spec, seqs, raw_Y, st
 
         y_true = y_true[y_mask].flatten() #一个值？
         y_pred = y_pred[y_mask] #这一句有什么用
+
+        y_true = y_true.flatten()
         
         if output_spec.output_type.is_categorical:
             y_pred = y_pred.reshape((-1, y_pred.shape[-1]))
@@ -118,6 +176,10 @@ def evaluate_by_len(model_generator, input_encoder, output_spec, seqs, raw_Y, st
         
     y_true = np.concatenate(y_trues, axis = 0)
     y_pred = np.concatenate(y_preds, axis = 0)
+    fpr_1, tpr_1, thresholds_1 = roc_curve(y_true, y_pred)
+    roc_auc_1 = auc(fpr_1, tpr_1)
+    Draw_ROC(fpr_1, tpr_1, roc_auc_1)
+
     all_results, confusion_matrix = get_evaluation_results(y_true, y_pred, output_spec, return_confusion_matrix = True)
     results.append(all_results)
     results_names.append('All')
@@ -145,7 +207,7 @@ def get_evaluation_results(y_true, y_pred, output_spec, return_confusion_matrix 
         
         if output_spec.output_type.is_binary:
             
-            y_pred_classes = (y_pred >= 0.5)
+            y_pred_classes = (y_pred >= 0.7)
             
             if len(np.unique(y_true)) == 2:
                 results['AUC'] = roc_auc_score(y_true, y_pred)
@@ -274,7 +336,7 @@ def predict_encode(seqs, input_encoder, seq_len=512, needs_filtering=True, datas
     X = input_encoder.encode_X(seqs, seq_len)  # X有两个list 第一个是映射的蛋白质 第二个是annotation
     return X
 
-def predict_our(model_generator, input_encoder, output_spec, seqs, start_seq_len=512, start_batch_size=32, increase_factor=2):
+def predict_our(model_generator, input_encoder, output_spec, seqs, start_seq_len=512, start_batch_size=32, increase_factor=2, threshold = 0.5):
     assert model_generator.optimizer_weights is None
 
     dataset = pd.DataFrame({'seq': seqs})
@@ -289,13 +351,7 @@ def predict_our(model_generator, input_encoder, output_spec, seqs, start_seq_len
 
 
         model = model_generator.create_model(seq_len)  # 根据蛋白质长度来构建模型 512 1024 2048
-        y_pred = model.predict(X, batch_size=batch_size) #y_pred还不是标签
-
-        # model_our = KerasClassifier(build_fn=model, epochs=10, batch_size=32)
-        # #X.shape??? y_true.shape???? X有两个 用哪个？
-        # scores = cross_val_score(model_our, X[0], y_true, scoring='accuracy', cv=5)
-        # print(scores)
-
+        y_pred = model.predict(X, batch_size=batch_size) # y_pred还不是标签 只是概率值
 
         if output_spec.output_type.is_categorical:
             y_pred = y_pred.reshape((-1, y_pred.shape[-1]))
@@ -303,14 +359,14 @@ def predict_our(model_generator, input_encoder, output_spec, seqs, start_seq_len
             y_pred = y_pred.flatten()
 
         if output_spec.output_type.is_binary:
-            y_pred_classes = (y_pred >= 0.5)
+            y_pred_classes = (y_pred >= threshold) # 将概率值转换为标签
 
-        #y_preds.append(y_pred_classes) #这里返回dataframe？ 然后遍历每一行输出 dataframe为seq predict
         if results == []:
             results.append([len_matching_dataset['seq'], y_pred_classes])
         else:
             results[0][0] = pd.concat([results[0][0], len_matching_dataset['seq']]).reset_index(drop=True)
             results[0][1] = np.concatenate((results[0][1], y_pred_classes))
-    results = dict(zip(results[0][0], results[0][1]))
 
+    # 打包为字典 可以键值对访问输出
+    results = dict(zip(results[0][0], results[0][1]))
     return results

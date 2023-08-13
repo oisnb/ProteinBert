@@ -21,9 +21,9 @@ def split_data(input_csv_path, train_csv_path, test_csv_path, test_ratio=0.33):
 
 if __name__ == "__main__":
     # 输入CSV文件路径和输出训练集、测试集的CSV文件路径
-    input_csv_path = "data/afp11_Final.csv"
-    train_csv_path = "protein_benchmarks/igem_afp11_train_data.csv"
-    test_csv_path = "protein_benchmarks/igem_afp11_test_data.csv"
+    input_csv_path = "data/afp1_5_Final_10000.csv"
+    train_csv_path = "protein_benchmarks/igem_afp1_5_train_data_update_10000.csv"
+    test_csv_path = "protein_benchmarks/igem_afp1_5_test_data_update_10000.csv"
 
     # 设置测试集占总数据的比例，默认为1/3
     test_ratio = 0.33

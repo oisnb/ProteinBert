@@ -7,7 +7,12 @@ from tensorflow import keras
 
 from .shared_utils.util import log
 from .tokenization import additional_token_to_index, n_tokens, tokenize_seq
-    
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
+
+
+
 class ModelGenerator:
 
     def __init__(self, optimizer_class = keras.optimizers.Adam, lr = 2e-04, other_optimizer_kwargs = {}, model_weights = None, optimizer_weights = None):
@@ -16,19 +21,70 @@ class ModelGenerator:
         self.other_optimizer_kwargs = other_optimizer_kwargs
         self.model_weights = model_weights
         self.optimizer_weights = optimizer_weights
-        
+
     def train(self, encoded_train_set, encoded_valid_set, seq_len, batch_size, n_epochs, lr = None, callbacks = [], **create_model_kwargs):
     
         train_X, train_Y, train_sample_weigths = encoded_train_set #train_X包含两个list
+        # valid_X, valid_Y, valid_sample_weights = encoded_valid_set  # train_X包含两个list valid_
+        # X_1 = np.concatenate([train_X[0], valid_X[0]], axis=0)
+        # X_2 = np.concatenate([train_X[1], valid_X[1]], axis=0)
+        # weigths = np.concatenate([train_sample_weigths, valid_sample_weights], axis=0)
+        # all_label = np.concatenate([train_Y, valid_Y], axis=0)
+
         self.dummy_epoch = (_slice_arrays(train_X, slice(0, 1)), _slice_arrays(train_Y, slice(0, 1)))
+
+        # train_losses = []
+        # val_losses = []
+        # best_loss = 100
+        # kf = KFold(n_splits=5, shuffle=True, random_state=42)
+        #
+        # for train_index, val_index in kf.split(all_label):
+        #     X_train_fold_1, X_val_fold_1 = X_1[train_index], X_1[val_index]
+        #     X_train_fold_2, X_val_fold_2 = X_2[train_index], X_2[val_index]
+        #     X_train_fold = [X_train_fold_1, X_train_fold_2]
+        #     X_val_fold = [X_val_fold_1, X_val_fold_2]
+        #     train_weights = weigths[train_index]
+        #     valid_weights = weigths[val_index]
+        #
+        #     y_train_fold, y_val_fold = all_label[train_index], all_label[val_index]
+        #
+        #     model = self.create_model(seq_len, **create_model_kwargs)
+        #     if lr is not None:
+        #         model.optimizer.lr = lr
+        #     history = model.fit(X_train_fold, y_train_fold, sample_weight = train_weights, batch_size = batch_size, epochs = n_epochs, validation_data = (X_val_fold, y_val_fold, valid_weights), \
+        #         callbacks = callbacks)
+        #
+        #     train_losses.append(history.history['loss'])
+        #     val_losses.append(history.history['val_loss'])
+        #     if np.mean(history.history['val_loss'], axis=0) < best_loss:
+        #         best_loss = np.mean(history.history['val_loss'], axis=0)
+        #         best_model = model
+        #
+        # self.update_state(best_model)  # 更新权重 能否用？
+        # mean_train_loss = np.mean(train_losses, axis=0)
+        # mean_val_loss = np.mean(val_losses, axis=0)
+
         model = self.create_model(seq_len, **create_model_kwargs)
-        
         if lr is not None:
             model.optimizer.lr = lr
         
-        model.fit(train_X, train_Y, sample_weight = train_sample_weigths, batch_size = batch_size, epochs = n_epochs, validation_data = encoded_valid_set, \
+        history = model.fit(train_X, train_Y, sample_weight = train_sample_weigths, batch_size = batch_size, epochs = n_epochs, validation_data = encoded_valid_set, \
                 callbacks = callbacks)
+
+        # valid_predict = model.predict(valid_X, batch_size=batch_size)
+        # valid_predict = valid_predict.flatten()
+        # fpr, tpr, thresholds = roc_curve(valid_Y, valid_predict)
+        # roc_auc = auc(fpr, tpr)
+        # Draw_ROC(fpr, tpr, roc_auc, seq_len)
+        #
+
+        # 获取训练损失值和验证损失值
+        train_loss = history.history['loss']
+        valid_loss = history.history['val_loss']
+        # epochs = range(1, len(train_loss) + 1)
+        # Draw_Loss(train_loss, valid_loss, epochs, seq_len)
         self.update_state(model) #更新权重 能否用？
+        return train_loss, valid_loss
         
     def update_state(self, model):
         self.model_weights = copy_weights([w.numpy() for w in model.variables])
@@ -136,7 +192,7 @@ class FinetuningModelGenerator(ModelGenerator):
                 
         model = keras.models.Model(inputs = model_inputs, outputs = output_layer)
         model.compile(loss = loss, optimizer =self.optimizer_class(learning_rate = self.lr, **self.other_optimizer_kwargs)) #无论训练还是测试都会走到这里 编译模型 训练就fit 测试就predict
-        
+        #通过加metrics='accuracy'?
         self._init_weights(model)
                 
         return model

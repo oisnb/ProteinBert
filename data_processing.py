@@ -35,14 +35,14 @@ def negative_protein_csv(input_csv_path, output_csv_path):
 
 if __name__ == "__main__":
     # 输入CSV文件路径和输出txt文件路径
-    input_csv_path = "data/afp11_positive.csv"
-    input2_csv_path = "data/negative.csv" #最后afp11的负样本要重新抽样
-    output_csv_path = "data/afp11_Final.csv"
+    positive_csv_path = "data/afp1_5_positive.csv"
+    negative_csv_path = "data/negative_10000.csv" #最后afp11的负样本要重新抽样
+    output_csv_path = "data/afp1_5_Final_10000.csv"
     if os.path.exists(output_csv_path):
         os.remove(output_csv_path)
 
-    positive_protein_csv(input_csv_path, output_csv_path)
+    positive_protein_csv(positive_csv_path, output_csv_path)
 
-    negative_protein_csv(input2_csv_path, output_csv_path)
+    negative_protein_csv(negative_csv_path, output_csv_path)
 
 
